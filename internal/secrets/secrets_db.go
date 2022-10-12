@@ -272,7 +272,7 @@ func DeleteUserSecretDB(userId, secretId int) error {
 
 	cn, tx, _ := storage.ApplicationDB.Begin()
 
-	_, err := tx.Exec(context.Background(), deleteQry, deleteArgs)
+	_, err := tx.Exec(context.Background(), deleteQry, deleteArgs...)
 	if err != nil {
 
 		logger.Logger.Error("err deleting secret", zap.Error(err))
