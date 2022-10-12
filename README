@@ -1,0 +1,40 @@
+Generate random secret key python:
+
+os.urandom(32).hex()
+
+---------------------------------------------------------------
+
+CREATE DATABASE ez_pwd_db ENCODING 'UTF-8' TEMPLATE template0;
+ALTER DATABASE ez_pwd_db SET timezone TO 'America/Lima';
+
+CREATE USER user_ez_pwd_db WITH PASSWORD 'user_ez_pwd_db';
+GRANT ALL PRIVILEGES ON DATABASE ez_pwd_db TO user_ez_pwd_db;
+
+---------------------------------------------------------------
+
+build steps:
+
+source activate-env.sh
+./build-api.sh
+
+
+---------------------------------------------------------------
+configuration file example:
+
+{
+  "SECRET_HEX": "",
+  "API_HOST_PORT": "localhost:5000",
+  "DATABASE_URL": "postgresql://postgres@172.17.0.4:6432/ez_pwd_db",
+  "COOKIE_WEB_DOMAIN": "yourdomain.com",
+  "DEBUG": false
+}
+
+---------------------------------------------------------------
+- postgres
+- linux
+
+Backend for the easy password manager:
+- Server never knows the real password.
+- All encryption happens on the frontend side using the web crypto apis.
+    - the original password is hashed to sha256 and it is sent to the server. The server stores the sha256 password using bcrypt.
+    - the original password is hashed to PBKDF2 and this is used to derive a AES-GCM key for the encryption.
