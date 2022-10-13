@@ -2,6 +2,7 @@ package apis
 
 import (
 	"app-ez-pwd/internal/secrets"
+	"fmt"
 	"github.com/labstack/echo/v4"
 	"net/http"
 	"strconv"
@@ -14,6 +15,8 @@ func RouteUserSecretsApiHandlers(group *echo.Group) {
 	group.POST("/user-secrets", NewUserSecretPOST)
 	group.PUT("/user-secrets", UpdateUserSecretsPUT)
 	group.DELETE("/user-secrets/:secretId", DeleteUserSecretDELETE)
+
+	group.GET("/user-secrets/backup", GenerateBackupUserSecretsGET)
 }
 
 func ListCategorySecretsGET(ctx echo.Context) error {
@@ -112,4 +115,14 @@ func DeleteUserSecretDELETE(ctx echo.Context) error {
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]string{})
+}
+
+func GenerateBackupUserSecretsGET(ctx echo.Context) error {
+	rawUserId := ctx.Get("userId")
+	userId, _ := rawUserId.(int)
+
+	username, byteSecrets := secrets.QueryUserSecretsForExportAsBackup(userId)
+
+	ctx.Response().Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=the-%s-secrets.zip", username))
+	return ctx.Blob(http.StatusOK, "application/zip", byteSecrets)
 }

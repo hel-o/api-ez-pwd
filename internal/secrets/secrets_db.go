@@ -3,10 +3,14 @@ package secrets
 import (
 	"app-ez-pwd/internal/logger"
 	"app-ez-pwd/internal/storage"
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	sq "github.com/Masterminds/squirrel"
 	"go.uber.org/zap"
+	"io"
 )
 
 type ListCategoryModel struct {
@@ -283,4 +287,80 @@ func DeleteUserSecretDB(userId, secretId int) error {
 	}
 
 	return err
+}
+
+func QueryUserSecretsForExportAsBackup(userId int) (string, []byte) {
+	cn, tx, _ := storage.ApplicationDB.Begin()
+	defer storage.ApplicationDB.Rollback(cn, tx)
+
+	selectUsername, selectUsernameArgs, _ := storage.ApplicationDB.Psql.
+		Select("username").
+		From("users").
+		Where(sq.Eq{
+			"id": userId,
+		}).ToSql()
+
+	var username string
+	if err := tx.QueryRow(context.Background(), selectUsername, selectUsernameArgs...).Scan(&username); err != nil {
+		logger.Logger.Error("err scan", zap.Error(err))
+	}
+
+	copyUserQuery := fmt.Sprintf("COPY (SELECT id, username, password_hash, created_at FROM users WHERE id = %d) TO STDOUT", userId)
+	outputWriterUserQuery := bytes.NewBuffer(make([]byte, 0))
+	result, err := cn.PgConn().CopyTo(context.Background(), outputWriterUserQuery, copyUserQuery)
+	if err != nil {
+		logger.Logger.Error("err copy to", zap.Error(err))
+	} else {
+		logger.Logger.Info("result copy users to", zap.Int64("RowsAffected", result.RowsAffected()))
+	}
+
+	copySecretCategoriesQuery := fmt.Sprintf("COPY (SELECT id, name, user_id FROM secret_categories WHERE user_id = %d) TO STDOUT", userId)
+	outputWriterCategoryQuery := bytes.NewBuffer(make([]byte, 0))
+	result, err = cn.PgConn().CopyTo(context.Background(), outputWriterCategoryQuery, copySecretCategoriesQuery)
+	if err != nil {
+		logger.Logger.Error("err copy to", zap.Error(err))
+	} else {
+		logger.Logger.Info("result copy secret_categories to", zap.Int64("RowsAffected", result.RowsAffected()))
+	}
+
+	copyUserSecretsQuery := fmt.Sprintf("COPY (SELECT id, description, username, password_json, safe_note_json, url_site, created_at, category_id, user_id FROM user_secrets WHERE user_id = %d) TO STDOUT", userId)
+	outputWriterSecretsQuery := bytes.NewBuffer(make([]byte, 0))
+	result, err = cn.PgConn().CopyTo(context.Background(), outputWriterSecretsQuery, copyUserSecretsQuery)
+	if err != nil {
+		logger.Logger.Error("err copy to", zap.Error(err))
+	} else {
+		logger.Logger.Info("result copy user_secrets to", zap.Int64("RowsAffected", result.RowsAffected()))
+	}
+
+	zipMemoryFile := bytes.NewBuffer(make([]byte, 0))
+	zipWriter := zip.NewWriter(zipMemoryFile)
+	// defer zipWriter.Close() // don't use defer we need to flush
+
+	userCSVWriter, _ := zipWriter.Create("1.csv")
+	if _, err = userCSVWriter.Write(outputWriterUserQuery.Bytes()); err != nil {
+		logger.Logger.Error("err writing zip file", zap.Error(err))
+	}
+
+	secretCategoriesCSVWriter, _ := zipWriter.Create("2.csv")
+	if _, err = secretCategoriesCSVWriter.Write(outputWriterCategoryQuery.Bytes()); err != nil {
+		logger.Logger.Error("err writing zip file", zap.Error(err))
+	}
+
+	secretsCSVWriter, _ := zipWriter.Create("3.csv")
+	// SAME AS: secretsCSVWriter.Write(outputWriterSecretsQuery.Bytes()) // ---> yep
+	if _, err = io.Copy(secretsCSVWriter, outputWriterSecretsQuery); err != nil {
+		logger.Logger.Error("err writing zip file", zap.Error(err))
+	}
+
+	_ = zipWriter.Close()
+
+	/*
+		// test the zip file:
+		err = os.WriteFile("/tmp/the-user.csv.zip", zipMemoryFile.Bytes(), 0777)
+		if err != nil {
+			logger.Logger.Error("err writing file", zap.Error(err))
+		}
+	*/
+
+	return username, zipMemoryFile.Bytes()
 }
